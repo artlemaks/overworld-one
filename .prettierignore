@@ -4,6 +4,11 @@ coverage/
 pnpm-lock.yaml
 graphify-out/
 *.docx
+# Terraform local state + provider binaries (not source).
+**/.terraform/
+*.tfstate
+*.tfstate.*
+.terraform.lock.hcl
 # Pre-existing planning docs + local config — owned elsewhere, not code-formatted.
 CLAUDE.md
 PHASE_TASKS.md

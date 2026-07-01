@@ -1,39 +1,11 @@
-import {
-  ContributionMessage,
-  createLogger,
-  type TickSnapshot,
-  type EventState,
-} from '@overworld/shared';
+import './styles.css';
+import { startApp } from './app.js';
 
 /**
- * Minimal client entry (P-1 foundation).
- *
- * Proves the /client package builds against the SAME shared contracts the server uses — the
- * anti-drift guarantee. The Pixi arena, netcode, and real rendering land in P0/P1
- * (OOM-16..24, OOM-32).
+ * Client entry (P0-C-0 / OOM-16). Mounts the landing -> join -> arena flow.
+ * The Pixi arena scene (OOM-17/18) and contribution action (OOM-19) build on top of this.
  */
-const logger = createLogger('client', 'debug');
-
-/** Build a contribution using the shared schema (server will re-validate + score it). */
-function makeContribution(playerId: string): ContributionMessage {
-  return ContributionMessage.parse({
-    playerId,
-    actionType: 'strike',
-    inputParams: { power: 1 },
-    clientTs: 0,
-  });
+const root = document.getElementById('app');
+if (root) {
+  startApp(root, { storage: window.localStorage });
 }
-
-/** Render the authoritative state pushed by the server each tick. */
-function render(tick: TickSnapshot): void {
-  const state: EventState = tick.eventState;
-  const app = document.getElementById('app');
-  if (app) {
-    app.textContent = `Boss HP: ${state.bossHp} — phase ${state.phase} (${state.phaseProgressPct}%)`;
-  }
-}
-
-const contribution = makeContribution('local-player');
-logger.info('client bootstrapped', { actionType: contribution.actionType });
-
-export { makeContribution, render };

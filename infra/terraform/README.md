@@ -5,11 +5,11 @@ defaults to off**, so a plain `apply` costs ~nothing.
 
 ## Cost model
 
-| State | What exists | ~Monthly |
-|-------|-------------|----------|
-| `runtime_enabled=false`, `postgres_enabled=false` (default) | VPC, ECR, ECS cluster, IAM/OIDC, log group, SGs | **~$0** (ECR storage cents) |
-| `runtime_enabled=true` | + ALB, Fargate (Spot) task, ElastiCache Redis t4g.micro | **~$40–55** while on |
-| `postgres_enabled=true` | + RDS Postgres db.t4g.micro single-AZ | **+~$13** while on |
+| State                                                       | What exists                                             | ~Monthly                    |
+| ----------------------------------------------------------- | ------------------------------------------------------- | --------------------------- |
+| `runtime_enabled=false`, `postgres_enabled=false` (default) | VPC, ECR, ECS cluster, IAM/OIDC, log group, SGs         | **~$0** (ECR storage cents) |
+| `runtime_enabled=true`                                      | + ALB, Fargate (Spot) task, ElastiCache Redis t4g.micro | **~$40–55** while on        |
+| `postgres_enabled=true`                                     | + RDS Postgres db.t4g.micro single-AZ                   | **+~$13** while on          |
 
 Cost choices: no NAT Gateway (Fargate in public subnets), Fargate **Spot**, Graviton (ARM64) everywhere,
 single-node/single-AZ, HTTP-only ALB for synthetic load tests (add `certificate_arn` for wss later),
