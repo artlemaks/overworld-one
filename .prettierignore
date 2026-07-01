@@ -1,0 +1,11 @@
+node_modules/
+dist/
+coverage/
+pnpm-lock.yaml
+graphify-out/
+*.docx
+# Pre-existing planning docs + local config — owned elsewhere, not code-formatted.
+CLAUDE.md
+PHASE_TASKS.md
+VAULT.md
+.claude/

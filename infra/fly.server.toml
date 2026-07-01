@@ -1,0 +1,20 @@
+# STUB — cloud provisioning for the server (P1F-I-4 / OOM-12).
+# NOT applied. Requires a Fly.io account + `fly` CLI auth + managed Redis/Postgres.
+# Fill <app-name>/<region> and run `fly deploy` once accounts exist. See infra/README.md.
+
+app = "<app-name>"
+primary_region = "<region>"
+
+[build]
+  # Server runs via tsx; a Dockerfile is added when this task is picked up.
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = false
+  min_machines_running = 1
+
+[[services.http_checks]]
+  path = "/healthz"
+  interval = "10s"
+  timeout = "2s"

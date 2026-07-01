@@ -1,0 +1,5 @@
+{
+  "extends": "./tsconfig.base.json",
+  "include": [],
+  "comment": "Root config is a no-op anchor; each package under shared/ server/ client/ owns its own tsconfig."
+}
