@@ -1,0 +1,8 @@
+# Never commit state (may contain the DB password) or local provider binaries.
+# The provider lock file (.terraform.lock.hcl) IS committed — pins provider versions.
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+crash.log

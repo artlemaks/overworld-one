@@ -1,0 +1,12 @@
+# Copy to terraform.tfvars and adjust. Defaults are already cost-minimal.
+
+# aws_region = "eu-west-1"
+
+# --- Cost toggles (both false = only free scaffolding is created) ---
+# runtime_enabled  = false   # true => ALB + Fargate + Redis (P1 load test); costs while on
+# postgres_enabled = false   # true => RDS Postgres (P2+)
+
+# server_image_tag     = "latest"
+# server_desired_count = 1
+
+# certificate_arn = ""       # set an ACM cert ARN to add a wss/HTTPS listener
