@@ -10,7 +10,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@overworld/shared": "workspace:*"
+    "@overworld/shared": "workspace:*",
+    "pixi.js": "^8.19.0"
   },
   "devDependencies": {
     "vite": "^6.0.5"

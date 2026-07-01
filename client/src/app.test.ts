@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { startApp } from './app.js';
 import type { KVStorage } from './session.js';
 
@@ -38,6 +38,18 @@ describe('startApp (landing -> arena flow)', () => {
     expect(app.session?.playerId).toBeTruthy();
     // now() ticks +5 twice around the join → 5ms measured.
     expect(app.joinDurationMs).toBe(5);
+  });
+
+  it('calls onArenaMount with the arena canvas element on join (Pixi seam)', () => {
+    let captured: HTMLElement | undefined;
+    const onArenaMount = vi.fn((c: HTMLElement) => {
+      captured = c;
+    });
+    startApp(root, { storage: memStorage(), onArenaMount });
+    (root.querySelector('[data-testid="join"]') as HTMLButtonElement).click();
+
+    expect(onArenaMount).toHaveBeenCalledTimes(1);
+    expect(captured?.id).toBe('arena-canvas');
   });
 
   it('a returning player keeps the same playerId', () => {
