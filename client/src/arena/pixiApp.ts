@@ -16,6 +16,7 @@ import {
   noopSfx,
   type SfxSink,
 } from './juice.js';
+import { createHeat } from './heat.js';
 
 /**
  * Pixi bootstrap + arena scene + contribution action (P0-C-1/2/3/4 · OOM-17–20).
@@ -82,6 +83,8 @@ export async function createArena(
   const shake = createScreenShake();
   const particles = createParticles();
   const hpTween = createTween(toArenaView(event.state(), BOSS_HP_MAX).hpFraction);
+  // Personal heat/combo (OOM-22): skill-only, self-only effectiveness — never buyable.
+  const heat = createHeat();
 
   const applyState = (): void => {
     const rawView = toArenaView(event.state(), BOSS_HP_MAX);
@@ -92,6 +95,7 @@ export async function createArena(
     scene.applyShake(shake.offset());
     scene.drawParticles(particles.items());
     scene.drawFloaters(floaters.items());
+    scene.setHeat(heat.value(), heat.combo());
   };
   applyState();
 
@@ -118,13 +122,18 @@ export async function createArena(
       // OOM-20: shape the strike into the shared wire contract + a provisional local score. The
       // server computes the authoritative value (P1-S-3); `message` is what OOM-32's netcode will send.
       const { message, localScore } = scoreStrike(strike, playerId);
-      localScoreTotal += localScore;
+
+      // OOM-22: heat builds from hit quality (skill only) and lifts this player's own effectiveness.
+      // Self-only, never buyable (enforce-non-p2w-guardrail) — the base score comes from OOM-20.
+      heat.registerHit(strike.accuracy);
+      const effectiveScore = Math.round(localScore * heat.multiplier());
+      localScoreTotal += effectiveScore;
 
       // OOM-21 juice: pop the number, kick the camera, spray sparks — all scaled by how good the hit
       // was, so a clean strike feels punchier than a graze.
       const green = Math.round(0xff * (1 - strike.accuracy));
       const red = Math.round(0xff * strike.accuracy);
-      floaters.spawn(`+${localScore}`, input.point.x, input.point.y, (green << 16) | (red << 8) | 0x40);
+      floaters.spawn(`+${effectiveScore}`, input.point.x, input.point.y, (green << 16) | (red << 8) | 0x40);
       shake.add(0.15 + 0.35 * strike.accuracy);
       particles.burst(input.point.x, input.point.y, 6 + Math.round(10 * strike.accuracy), {
         seed: strikeCount * 0.7,
@@ -137,6 +146,9 @@ export async function createArena(
         actionType: message.actionType,
         accuracy: Number(strike.accuracy.toFixed(2)),
         localScore,
+        heatMultiplier: Number(heat.multiplier().toFixed(2)),
+        combo: heat.combo(),
+        effectiveScore,
         localScoreTotal,
       });
     }
@@ -154,6 +166,7 @@ export async function createArena(
       shake.advance(stepMs);
       particles.advance(stepMs);
       hpTween.advance(stepMs);
+      heat.advance(stepMs);
     },
     render: applyState,
   });

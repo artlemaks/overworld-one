@@ -35,6 +35,8 @@ export interface ArenaScene {
   drawParticles(items: ParticleItem[]): void;
   /** Draw the current floating-text pops (OOM-21). */
   drawFloaters(items: FloatingItem[]): void;
+  /** Update the personal heat/combo meter; `value` in [0,1], `combo` the streak count (OOM-22). */
+  setHeat(value: number, combo: number): void;
   destroy(): void;
 }
 
@@ -85,6 +87,13 @@ export function createArenaScene(app: Application): ArenaScene {
   const hpBarBg = new Graphics();
   const hpBarFill = new Graphics();
   const hpBarBorder = new Graphics();
+  const heatBarBg = new Graphics();
+  const heatBarFill = new Graphics();
+  const heatText = new Text({
+    text: '',
+    style: { fill: TEXT_FILL, fontFamily: 'system-ui', fontSize: 14, fontWeight: 'bold' },
+  });
+  heatText.anchor.set(0.5);
 
   const hpText = new Text({
     text: '',
@@ -112,7 +121,18 @@ export function createArenaScene(app: Application): ArenaScene {
 
   // beatRing behind the boss (pulses around it); strikeMark + particles + floaters above it.
   world.addChild(beatRing, boss, strikeMark, particlesGfx, ...floaters);
-  root.addChild(background, world, hpBarBg, hpBarFill, hpBarBorder, phaseText, hpText);
+  root.addChild(
+    background,
+    world,
+    hpBarBg,
+    hpBarFill,
+    hpBarBorder,
+    phaseText,
+    hpText,
+    heatBarBg,
+    heatBarFill,
+    heatText,
+  );
 
   let width = app.screen.width;
   let height = app.screen.height;
@@ -121,6 +141,8 @@ export function createArenaScene(app: Application): ArenaScene {
   let bossY = height * 0.46;
   let beatPhase = 0;
   let lastStrike: { point: Vec2; accuracy: number } | null = null;
+  let heatValue = 0;
+  let heatCombo = 0;
 
   const radius = (): number => Math.min(width, height) * STRIKE_RADIUS_FRACTION;
 
@@ -137,6 +159,22 @@ export function createArenaScene(app: Application): ArenaScene {
     // Brightest on the beat, dim between beats — reinforces the "strike now" moment.
     const alpha = 0.25 + 0.55 * (1 - toBeat);
     beatRing.clear().circle(bossX, bossY, r).stroke({ width: 3, color: 0x58a6ff, alpha });
+  };
+
+  /** Personal heat/combo meter, low-centre. Warms amber→red as heat builds; hidden when cold. */
+  const drawHeat = (): void => {
+    const barW = Math.min(360, width * 0.5);
+    const x = (width - barW) / 2;
+    const y = height - 40;
+    heatBarBg.clear().roundRect(x, y, barW, 12, 6).fill({ color: 0x21262d, alpha: 0.8 });
+    heatBarFill.clear();
+    const fillW = barW * Math.min(1, Math.max(0, heatValue));
+    if (fillW > 0) {
+      const color = heatValue > 0.66 ? 0xff5c39 : heatValue > 0.33 ? 0xf0883e : 0xd29922;
+      heatBarFill.roundRect(x, y, fillW, 12, 6).fill(color);
+    }
+    heatText.text = heatCombo > 1 ? `HEAT ×${heatCombo}` : '';
+    heatText.position.set(width / 2, y - 12);
   };
 
   /** Confirmation marker at the last strike point, tinted green (accurate) → red (poor). */
@@ -183,6 +221,7 @@ export function createArenaScene(app: Application): ArenaScene {
 
     drawBeat();
     drawStrikeMark();
+    drawHeat();
   };
 
   redraw();
@@ -220,6 +259,11 @@ export function createArenaScene(app: Application): ArenaScene {
       for (const p of items) {
         particlesGfx.circle(p.x, p.y, p.radius).fill({ color: p.color, alpha: p.alpha });
       }
+    },
+    setHeat(value: number, combo: number): void {
+      heatValue = value;
+      heatCombo = combo;
+      drawHeat();
     },
     drawFloaters(items: FloatingItem[]): void {
       for (let i = 0; i < floaters.length; i++) {
