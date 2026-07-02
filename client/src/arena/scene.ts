@@ -2,6 +2,7 @@ import { Application, Container, Graphics, Text } from 'pixi.js';
 import type { ArenaView } from './sceneModel.js';
 import type { Vec2 } from './contribution.js';
 import type { ShakeOffset, FloatingItem, ParticleItem } from './juice.js';
+import { computeArenaLayout } from './layout.js';
 
 /**
  * Arena Pixi scene (P0-C-2/5 · OOM-18, OOM-21).
@@ -43,8 +44,6 @@ export interface ArenaScene {
 const BAR_HEIGHT = 22;
 const BAR_TOP = 48;
 const TEXT_FILL = '#e6edf3';
-/** Aim ring radius as a fraction of the smaller viewport dimension — forgiving on mobile (OOM-19). */
-const STRIKE_RADIUS_FRACTION = 0.4;
 /** Reused Text objects for number pops — a fixed pool avoids per-frame allocation (OOM-21). */
 const FLOATER_POOL = 24;
 
@@ -143,12 +142,15 @@ export function createArenaScene(app: Application): ArenaScene {
   let lastStrike: { point: Vec2; accuracy: number } | null = null;
   let heatValue = 0;
   let heatCombo = 0;
+  // Responsive metrics recomputed each redraw from the viewport (OOM-24).
+  let radiusPx = Math.min(width, height) * 0.4;
+  let barWidthPx = Math.min(560, width * 0.7);
+  let bossScale = 1;
 
-  const radius = (): number => Math.min(width, height) * STRIKE_RADIUS_FRACTION;
+  const radius = (): number => radiusPx;
 
   const barMetrics = (): { barW: number; x: number; y: number } => {
-    const barW = Math.min(560, width * 0.7);
-    return { barW, x: (width - barW) / 2, y: BAR_TOP };
+    return { barW: barWidthPx, x: (width - barWidthPx) / 2, y: BAR_TOP };
   };
 
   /** Timing cue: a ring that contracts toward the boss as the next beat approaches. */
@@ -190,18 +192,23 @@ export function createArenaScene(app: Application): ArenaScene {
   };
 
   const redraw = (): void => {
+    // Responsive metrics: orientation-aware boss placement, sizes, and a floored touch target.
+    const layout = computeArenaLayout(width, height);
+    radiusPx = layout.strikeRadius;
+    barWidthPx = layout.hpBarWidth;
+    bossScale = layout.bossScale;
+
     // Background: dark backdrop + a lighter floor band.
     const floorY = height * 0.72;
     background.clear();
     background.rect(0, 0, width, height).fill(0x0e1116);
     background.rect(0, floorY, width, height - floorY).fill(0x161b22);
 
-    // Boss, centred in the upper-middle, scaled gently with viewport width.
+    // Boss, centred horizontally and seated per orientation (higher in portrait for thumb room).
     bossX = width / 2;
-    bossY = height * 0.46;
+    bossY = height * layout.bossCenterYFraction;
     boss.position.set(bossX, bossY);
-    const scale = Math.min(1.4, Math.max(0.6, width / 900));
-    boss.scale.set(scale);
+    boss.scale.set(bossScale);
 
     // HP bar: track, fill (scaled by fraction), border.
     const { barW, x, y } = barMetrics();

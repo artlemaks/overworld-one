@@ -18,6 +18,7 @@ import {
   type SfxSink,
 } from './juice.js';
 import { createHeat } from './heat.js';
+import { prefersReducedMotion } from './layout.js';
 
 /**
  * Pixi bootstrap + arena scene + contribution action (P0-C-1/2/3/4 · OOM-17–20).
@@ -43,6 +44,8 @@ export interface CreateArenaOptions {
   playerId?: string;
   /** Sound sink for feedback juice (OOM-21); defaults to a no-op until audio lands. */
   sfx?: SfxSink;
+  /** Force the reduced-motion path (OOM-24); defaults to the OS `prefers-reduced-motion` setting. */
+  reducedMotion?: boolean;
 }
 
 const LOGIC_HZ = 60;
@@ -58,6 +61,9 @@ export async function createArena(
   const logger = createLogger('arena', 'debug');
   const playerId = options.playerId ?? 'local-anon';
   const sfx = options.sfx ?? noopSfx;
+  // Reduced motion (OOM-24): honour the OS setting; suppress camera shake + particle sprays but
+  // keep informative number pops and phase banners.
+  const reducedMotion = options.reducedMotion ?? prefersReducedMotion();
 
   const app = new Application();
   await app.init({
@@ -137,11 +143,13 @@ export async function createArena(
       const green = Math.round(0xff * (1 - strike.accuracy));
       const red = Math.round(0xff * strike.accuracy);
       floaters.spawn(`+${effectiveScore}`, input.point.x, input.point.y, (green << 16) | (red << 8) | 0x40);
-      shake.add(0.15 + 0.35 * strike.accuracy);
-      particles.burst(input.point.x, input.point.y, 6 + Math.round(10 * strike.accuracy), {
-        seed: strikeCount * 0.7,
-        speed: 0.12 + 0.12 * strike.accuracy,
-      });
+      if (!reducedMotion) {
+        shake.add(0.15 + 0.35 * strike.accuracy);
+        particles.burst(input.point.x, input.point.y, 6 + Math.round(10 * strike.accuracy), {
+          seed: strikeCount * 0.7,
+          speed: 0.12 + 0.12 * strike.accuracy,
+        });
+      }
       sfx.play('strike', { volume: 0.3 + 0.7 * strike.accuracy });
       strikeCount += 1;
 
@@ -163,7 +171,7 @@ export async function createArena(
     if (!transition) return;
     const center = scene.bossCenter();
     floaters.spawn(PHASE_LABELS[transition.to], center.x, center.y - 120, 0xffffff);
-    shake.add(0.5);
+    if (!reducedMotion) shake.add(0.5);
     sfx.play('phase', { volume: 0.6 });
     logger.info('phase transition', { from: transition.from, to: transition.to });
   };
