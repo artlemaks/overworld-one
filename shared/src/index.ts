@@ -19,3 +19,7 @@ export * from './cosmetics.js';
 export * from './currency.js';
 export * from './store.js';
 export * from './privacy.js';
+// P5 — scale hardening, moderation, polish
+export * from './moderation.js';
+export * from './challenge.js';
+export * from './liveops.js';
