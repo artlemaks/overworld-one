@@ -2,7 +2,8 @@ import { Application } from 'pixi.js';
 import { createLogger } from '@overworld/shared';
 import { createFixedLoop } from './loop.js';
 import { createArenaScene } from './scene.js';
-import { toArenaView } from './sceneModel.js';
+import { toArenaView, PHASE_LABELS } from './sceneModel.js';
+import { createPhaseTracker } from './phases.js';
 import { createMockEvent } from './mockEvent.js';
 import { createInputBuffer } from './input.js';
 import { attachPointerInput } from './pointerInput.js';
@@ -85,6 +86,8 @@ export async function createArena(
   const hpTween = createTween(toArenaView(event.state(), BOSS_HP_MAX).hpFraction);
   // Personal heat/combo (OOM-22): skill-only, self-only effectiveness — never buyable.
   const heat = createHeat();
+  // Local phase transitions (OOM-23): punctuate each HP-threshold crossing with a flash + shake.
+  const phaseTracker = createPhaseTracker();
 
   const applyState = (): void => {
     const rawView = toArenaView(event.state(), BOSS_HP_MAX);
@@ -154,11 +157,23 @@ export async function createArena(
     }
   };
 
+  // Announce an HP-threshold phase crossing: banner at the boss, a camera kick, and a cue (OOM-23).
+  const onPhaseChange = (): void => {
+    const transition = phaseTracker.update(event.state().phase);
+    if (!transition) return;
+    const center = scene.bossCenter();
+    floaters.spawn(PHASE_LABELS[transition.to], center.x, center.y - 120, 0xffffff);
+    shake.add(0.5);
+    sfx.play('phase', { volume: 0.6 });
+    logger.info('phase transition', { from: transition.from, to: transition.to });
+  };
+
   // Fixed 60 Hz simulation feeds the mock event + beat + strike ingest; render reflects it each frame.
   const loop = createFixedLoop({
     stepMs: 1000 / LOGIC_HZ,
     update: (stepMs) => {
       event.advance(stepMs);
+      onPhaseChange();
       timing.advance(stepMs);
       consumeStrikes();
       // Advance juice on the fixed step so effects are deterministic and frame-rate independent.

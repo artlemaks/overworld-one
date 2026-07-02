@@ -1,4 +1,5 @@
 import type { EventState, Phase } from '@overworld/shared';
+import { combatPhaseForFraction, combatPhaseProgressPct } from './phases.js';
 
 /**
  * Deterministic mock event driver (P0-C-2 / OOM-18).
@@ -30,10 +31,6 @@ export interface MockEvent {
 
 const clampPct = (n: number): number => Math.min(100, Math.max(0, n));
 
-/** Phase-1/2/3 split the combat HP range into equal thirds. */
-const PHASE_1_FLOOR = 2 / 3;
-const PHASE_2_FLOOR = 1 / 3;
-
 interface Derived {
   phase: Phase;
   phaseProgressPct: number;
@@ -52,14 +49,12 @@ function derive(
 
   const fraction = opts.hpMax > 0 ? hp / opts.hpMax : 0;
 
-  if (fraction > PHASE_1_FLOOR) {
-    return { phase: 'phase-1', phaseProgressPct: clampPct((1 - fraction) / (1 / 3) * 100) };
-  }
-  if (fraction > PHASE_2_FLOOR) {
-    return { phase: 'phase-2', phaseProgressPct: clampPct((PHASE_1_FLOOR - fraction) / (1 / 3) * 100) };
-  }
+  // Combat phase + progress come from the shared threshold logic (OOM-23) so nothing drifts.
   if (fraction > 0) {
-    return { phase: 'phase-3', phaseProgressPct: clampPct((PHASE_2_FLOOR - fraction) / (1 / 3) * 100) };
+    return {
+      phase: combatPhaseForFraction(fraction),
+      phaseProgressPct: combatPhaseProgressPct(fraction),
+    };
   }
   if (resolveElapsedMs < opts.resolveMs) {
     const pct = opts.resolveMs > 0 ? (resolveElapsedMs / opts.resolveMs) * 100 : 100;
