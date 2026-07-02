@@ -1,4 +1,22 @@
-import { type LifecycleStatus, isTerminalStatus } from '@overworld/shared';
+import { type LifecycleStatus, type Phase, isTerminalStatus } from '@overworld/shared';
+
+/**
+ * Map a wire combat {@link Phase} to the lifecycle status it implies — the bridge auto-recovery uses to
+ * restore an FSM from a checkpointed {@link EventState} (which carries only the combat phase). The
+ * combat phases (phase-1/2/3) all live inside `active`.
+ */
+export function lifecycleStatusForPhase(phase: Phase): LifecycleStatus {
+  switch (phase) {
+    case 'pending':
+      return 'pending';
+    case 'resolving':
+      return 'resolving';
+    case 'resolved':
+      return 'resolved';
+    default:
+      return 'active';
+  }
+}
 
 /**
  * Event lifecycle FSM (P2-S-1 / OOM-37).
