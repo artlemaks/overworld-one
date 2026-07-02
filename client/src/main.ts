@@ -11,7 +11,12 @@ if (root) {
   startApp(root, {
     storage: window.localStorage,
     onArenaMount: (canvas, session) => {
-      void createArena(canvas, { playerId: session.playerId });
+      // OOM-32: when VITE_SERVER_URL is set, the arena connects to the authoritative server; otherwise
+      // it runs the offline P0 mock. Lets the same build be single-player-offline or online.
+      void createArena(canvas, {
+        playerId: session.playerId,
+        serverUrl: import.meta.env.VITE_SERVER_URL,
+      });
     },
   });
 }

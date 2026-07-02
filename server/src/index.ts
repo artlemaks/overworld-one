@@ -1,49 +1,69 @@
 import { createServer } from 'node:http';
-import {
-  parseEnv,
-  createLogger,
-  withErrorBoundary,
-  TickSnapshot,
-  type Env,
-} from '@overworld/shared';
+import Redis from 'ioredis';
+import { parseEnv, createLogger, withErrorBoundary, type Env } from '@overworld/shared';
+import { createRedisCounterStore } from './state/counters.js';
+import { createRedisPubSub } from './state/pubsub.js';
+import { createWsTransport } from './net/transport.js';
+import { buildServer } from './buildServer.js';
 
 /**
- * Minimal server entry (P-1 foundation).
+ * Server entry (P1 real-time core).
  *
- * This is intentionally thin: it proves the /server package boots against the SHARED contracts
- * (`@overworld/shared`) and validated env. The real WebSocket server, Redis counters, and tick
- * broadcast land in P1 (OOM-25..36).
+ * Boots the full P1 graph against real infrastructure: an HTTP server (health + Prometheus metrics),
+ * a `ws` transport sharing that port, and Redis-backed authoritative counters + pub/sub fan-out. The
+ * actual wiring lives in `buildServer.ts` so this file only owns process concerns — env, connections,
+ * routes, and graceful shutdown.
  */
 async function main(env: Env): Promise<void> {
   const logger = createLogger('server', env.LOG_LEVEL);
 
-  // Prove the tick contract is usable here (same schema the client will consume).
-  const sampleTick = TickSnapshot.parse({
-    eventState: {
-      bossHp: 1000,
-      phase: 'pending',
-      phaseProgressPct: 0,
-      contribWaveCount: 0,
-      playersContributingNow: 0,
-    },
-    aggregateStats: { contribDelta: 0, contribRate: 0 },
-    serverTs: 0,
-  });
+  // One connection for commands + publish; a dedicated one for subscribe (ioredis requirement).
+  const redis = new Redis(env.REDIS_URL, { lazyConnect: false, maxRetriesPerRequest: 3 });
+  const redisSub = redis.duplicate();
+  redis.on('error', (err) => logger.error('redis error', { error: err.message }));
 
-  const server = createServer((req, res) => {
+  const counterStore = createRedisCounterStore(redis);
+  const pubsub = createRedisPubSub(redis, redisSub);
+
+  // Holder so the /metrics route can reach the graph once it is built (the transport needs the HTTP
+  // server, which needs this handler — a reference cycle resolved by mutating a const holder).
+  const graph: { built?: Awaited<ReturnType<typeof buildServer>> } = {};
+
+  const httpServer = createServer((req, res) => {
     if (req.url === '/healthz') {
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ status: 'ok', tickHz: env.TICK_HZ }));
+      return;
+    }
+    if (req.url === '/metrics' && graph.built) {
+      res.writeHead(200, { 'content-type': 'text/plain; version=0.0.4' });
+      res.end(graph.built.metrics.renderPrometheus());
       return;
     }
     res.writeHead(404);
     res.end();
   });
 
-  server.listen(env.PORT, () => {
+  const transport = createWsTransport(httpServer);
+  const built = await buildServer({ env, counterStore, pubsub, transport });
+  graph.built = built;
+  await built.start();
+
+  httpServer.listen(env.PORT, () => {
     logger.info('server listening', { port: env.PORT, tickHz: env.TICK_HZ });
-    logger.debug('initial tick contract validated', { phase: sampleTick.eventState.phase });
   });
+
+  const shutdown = async (): Promise<void> => {
+    logger.info('shutting down');
+    built.stop();
+    await transport.close();
+    await pubsub.close();
+    await counterStore.close();
+    httpServer.close();
+    process.exit(0);
+  };
+  process.on('SIGINT', () => void shutdown());
+  process.on('SIGTERM', () => void shutdown());
 }
 
 const env = parseEnv(process.env);

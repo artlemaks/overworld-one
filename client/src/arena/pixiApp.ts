@@ -1,10 +1,12 @@
 import { Application } from 'pixi.js';
-import { createLogger } from '@overworld/shared';
+import { createLogger, type EventState } from '@overworld/shared';
 import { createFixedLoop } from './loop.js';
 import { createArenaScene } from './scene.js';
 import { toArenaView, PHASE_LABELS } from './sceneModel.js';
 import { createPhaseTracker } from './phases.js';
 import { createMockEvent } from './mockEvent.js';
+import { createNetClient } from '../net/netClient.js';
+import { browserSocketFactory } from '../net/wsSocket.js';
 import { createInputBuffer } from './input.js';
 import { attachPointerInput } from './pointerInput.js';
 import { createStrikeTiming, resolveStrike, type StrikeInput } from './contribution.js';
@@ -46,10 +48,24 @@ export interface CreateArenaOptions {
   sfx?: SfxSink;
   /** Force the reduced-motion path (OOM-24); defaults to the OS `prefers-reduced-motion` setting. */
   reducedMotion?: boolean;
+  /**
+   * WebSocket URL of the authoritative server (OOM-32). When set, the arena renders the server tick
+   * stream (interpolated) and sends each strike for authoritative scoring — the P1 online path. When
+   * omitted, it falls back to the P0 deterministic local mock so single-player dev still works offline.
+   */
+  serverUrl?: string;
 }
 
 const LOGIC_HZ = 60;
 const BOSS_HP_MAX = 1000;
+/** Shown until the first server tick arrives on the online path — a full bar in "Get Ready". */
+const PENDING_STATE: EventState = {
+  bossHp: BOSS_HP_MAX,
+  phase: 'pending',
+  phaseProgressPct: 0,
+  contribWaveCount: 0,
+  playersContributingNow: 0,
+};
 /** Strike rhythm: a beat roughly every 900ms with a 300ms scoring window (OOM-19). */
 const BEAT_PERIOD_MS = 900;
 const BEAT_WINDOW_MS = 300;
@@ -78,7 +94,30 @@ export async function createArena(
   mount.replaceChildren(app.canvas);
 
   const scene = createArenaScene(app);
-  const event = createMockEvent({ hpMax: BOSS_HP_MAX });
+
+  // State source (OOM-32): online = the authoritative, interpolated server stream; offline = the P0
+  // deterministic mock. Both expose the same `EventState` so everything downstream is source-agnostic.
+  const serverUrl = options.serverUrl;
+  const net = serverUrl
+    ? createNetClient({ url: serverUrl, playerId, connect: browserSocketFactory })
+    : null;
+
+  let currentState: () => EventState;
+  let currentHpMax: () => number;
+  let advanceSim: (stepMs: number) => void;
+
+  if (net) {
+    net.start();
+    currentState = () => net.renderState(performance.now()) ?? PENDING_STATE;
+    currentHpMax = () => net.bossHpMax() ?? BOSS_HP_MAX;
+    advanceSim = () => {}; // authoritative state arrives via ticks — nothing to advance locally
+    logger.info('arena online', { serverUrl });
+  } else {
+    const mock = createMockEvent({ hpMax: BOSS_HP_MAX });
+    currentState = () => mock.state();
+    currentHpMax = () => BOSS_HP_MAX;
+    advanceSim = (stepMs) => mock.advance(stepMs);
+  }
 
   // Contribution action (OOM-19): pointer/touch → buffer → per-step drain → aim-and-strike resolve.
   const inputBuffer = createInputBuffer<StrikeInput>();
@@ -89,14 +128,14 @@ export async function createArena(
   const floaters = createFloatingText();
   const shake = createScreenShake();
   const particles = createParticles();
-  const hpTween = createTween(toArenaView(event.state(), BOSS_HP_MAX).hpFraction);
+  const hpTween = createTween(toArenaView(currentState(), currentHpMax()).hpFraction);
   // Personal heat/combo (OOM-22): skill-only, self-only effectiveness — never buyable.
   const heat = createHeat();
   // Local phase transitions (OOM-23): punctuate each HP-threshold crossing with a flash + shake.
   const phaseTracker = createPhaseTracker();
 
   const applyState = (): void => {
-    const rawView = toArenaView(event.state(), BOSS_HP_MAX);
+    const rawView = toArenaView(currentState(), currentHpMax());
     hpTween.set(rawView.hpFraction);
     // HP bar slides toward the true value; text stays exact.
     scene.update({ ...rawView, hpFraction: hpTween.value() });
@@ -136,7 +175,13 @@ export async function createArena(
       // Self-only, never buyable (enforce-non-p2w-guardrail) — the base score comes from OOM-20.
       heat.registerHit(strike.accuracy);
       const effectiveScore = Math.round(localScore * heat.multiplier());
-      localScoreTotal += effectiveScore;
+      if (net) {
+        // Online (OOM-32): the server owns the authoritative points. Show `effectiveScore`
+        // optimistically; the netclient reconciles it to the server's value on the contribAck.
+        net.sendContribution(message, effectiveScore);
+      } else {
+        localScoreTotal += effectiveScore;
+      }
 
       // OOM-21 juice: pop the number, kick the camera, spray sparks — all scaled by how good the hit
       // was, so a clean strike feels punchier than a graze.
@@ -160,14 +205,14 @@ export async function createArena(
         heatMultiplier: Number(heat.multiplier().toFixed(2)),
         combo: heat.combo(),
         effectiveScore,
-        localScoreTotal,
+        scoreTotal: net ? net.displayScore() : localScoreTotal,
       });
     }
   };
 
   // Announce an HP-threshold phase crossing: banner at the boss, a camera kick, and a cue (OOM-23).
   const onPhaseChange = (): void => {
-    const transition = phaseTracker.update(event.state().phase);
+    const transition = phaseTracker.update(currentState().phase);
     if (!transition) return;
     const center = scene.bossCenter();
     floaters.spawn(PHASE_LABELS[transition.to], center.x, center.y - 120, 0xffffff);
@@ -180,7 +225,7 @@ export async function createArena(
   const loop = createFixedLoop({
     stepMs: 1000 / LOGIC_HZ,
     update: (stepMs) => {
-      event.advance(stepMs);
+      advanceSim(stepMs);
       onPhaseChange();
       timing.advance(stepMs);
       consumeStrikes();
@@ -202,6 +247,7 @@ export async function createArena(
 
   return {
     destroy() {
+      net?.stop();
       app.renderer.off('resize', relayout);
       pointer.destroy();
       scene.destroy();
