@@ -9,10 +9,11 @@ export interface AppDeps {
   /** Injectable clock for deterministic time-to-arena measurement in tests. */
   now?: () => number;
   /**
-   * Called with the arena canvas element once the arena mounts. The real entry passes Pixi's
-   * `createArena` here; tests leave it undefined so `app.ts` stays browser-free (OOM-17 seam).
+   * Called with the arena canvas element and the joined session once the arena mounts. The real entry
+   * passes Pixi's `createArena` here (using `session.playerId` as the contribution identity, OOM-20);
+   * tests leave it undefined so `app.ts` stays browser-free (OOM-17 seam).
    */
-  onArenaMount?: (canvas: HTMLElement) => void;
+  onArenaMount?: (canvas: HTMLElement, session: Session) => void;
 }
 
 export interface App {
@@ -43,7 +44,7 @@ export function startApp(root: HTMLElement, deps: AppDeps): App {
     // P0 is client-only: "connect" is a local no-op. Real WS connect arrives in OOM-32.
     screens.join();
     const canvas = mountArena(root, session);
-    deps.onArenaMount?.(canvas);
+    deps.onArenaMount?.(canvas, session);
     joinDurationMs = now() - started;
     logger.info('joined arena', { playerId: session.playerId, joinDurationMs });
     capture('join_the_fight', { joinDurationMs });

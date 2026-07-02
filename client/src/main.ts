@@ -10,8 +10,8 @@ const root = document.getElementById('app');
 if (root) {
   startApp(root, {
     storage: window.localStorage,
-    onArenaMount: (canvas) => {
-      void createArena(canvas);
+    onArenaMount: (canvas, session) => {
+      void createArena(canvas, { playerId: session.playerId });
     },
   });
 }
