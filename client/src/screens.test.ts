@@ -22,4 +22,25 @@ describe('createScreenController', () => {
     c.join();
     expect(onChange).toHaveBeenCalledTimes(1);
   });
+
+  it('moves arena -> resolution on resolve, and back to arena on next', () => {
+    const onChange = vi.fn();
+    const c = createScreenController(onChange);
+    c.join();
+    expect(c.resolve()).toBe('resolution');
+    expect(c.current).toBe('resolution');
+    expect(c.next()).toBe('arena');
+    expect(onChange).toHaveBeenLastCalledWith('arena');
+  });
+
+  it('ignores resolve() unless in the arena', () => {
+    const c = createScreenController();
+    expect(c.resolve()).toBe('landing'); // still on landing
+  });
+
+  it('ignores next() unless on the resolution screen', () => {
+    const c = createScreenController();
+    c.join();
+    expect(c.next()).toBe('arena'); // no-op from the arena
+  });
 });
