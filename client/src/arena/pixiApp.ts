@@ -8,6 +8,14 @@ import { createInputBuffer } from './input.js';
 import { attachPointerInput } from './pointerInput.js';
 import { createStrikeTiming, resolveStrike, type StrikeInput } from './contribution.js';
 import { scoreStrike } from './scoring.js';
+import {
+  createFloatingText,
+  createScreenShake,
+  createParticles,
+  createTween,
+  noopSfx,
+  type SfxSink,
+} from './juice.js';
 
 /**
  * Pixi bootstrap + arena scene + contribution action (P0-C-1/2/3/4 · OOM-17–20).
@@ -31,6 +39,8 @@ export interface Arena {
 export interface CreateArenaOptions {
   /** Wire identity for contributions (session token). Defaults to a local anon id in dev. */
   playerId?: string;
+  /** Sound sink for feedback juice (OOM-21); defaults to a no-op until audio lands. */
+  sfx?: SfxSink;
 }
 
 const LOGIC_HZ = 60;
@@ -45,6 +55,7 @@ export async function createArena(
 ): Promise<Arena> {
   const logger = createLogger('arena', 'debug');
   const playerId = options.playerId ?? 'local-anon';
+  const sfx = options.sfx ?? noopSfx;
 
   const app = new Application();
   await app.init({
@@ -66,9 +77,21 @@ export async function createArena(
   const pointer = attachPointerInput(app, inputBuffer);
   const timing = createStrikeTiming({ periodMs: BEAT_PERIOD_MS, windowMs: BEAT_WINDOW_MS });
 
+  // Feedback juice (OOM-21): number pops, camera shake, particle bursts, and a smoothed HP bar.
+  const floaters = createFloatingText();
+  const shake = createScreenShake();
+  const particles = createParticles();
+  const hpTween = createTween(toArenaView(event.state(), BOSS_HP_MAX).hpFraction);
+
   const applyState = (): void => {
-    scene.update(toArenaView(event.state(), BOSS_HP_MAX));
+    const rawView = toArenaView(event.state(), BOSS_HP_MAX);
+    hpTween.set(rawView.hpFraction);
+    // HP bar slides toward the true value; text stays exact.
+    scene.update({ ...rawView, hpFraction: hpTween.value() });
     scene.setBeat(timing.phase());
+    scene.applyShake(shake.offset());
+    scene.drawParticles(particles.items());
+    scene.drawFloaters(floaters.items());
   };
   applyState();
 
@@ -80,6 +103,8 @@ export async function createArena(
 
   // Running local tally — a provisional P0 feel signal; the server owns the real total in P1.
   let localScoreTotal = 0;
+  // Deterministic per-strike seed for particle fan rotation (no RNG in the sim).
+  let strikeCount = 0;
 
   // Drain buffered inputs at the fixed step so consumption is deterministic and none are lost.
   const consumeStrikes = (): void => {
@@ -94,6 +119,20 @@ export async function createArena(
       // server computes the authoritative value (P1-S-3); `message` is what OOM-32's netcode will send.
       const { message, localScore } = scoreStrike(strike, playerId);
       localScoreTotal += localScore;
+
+      // OOM-21 juice: pop the number, kick the camera, spray sparks — all scaled by how good the hit
+      // was, so a clean strike feels punchier than a graze.
+      const green = Math.round(0xff * (1 - strike.accuracy));
+      const red = Math.round(0xff * strike.accuracy);
+      floaters.spawn(`+${localScore}`, input.point.x, input.point.y, (green << 16) | (red << 8) | 0x40);
+      shake.add(0.15 + 0.35 * strike.accuracy);
+      particles.burst(input.point.x, input.point.y, 6 + Math.round(10 * strike.accuracy), {
+        seed: strikeCount * 0.7,
+        speed: 0.12 + 0.12 * strike.accuracy,
+      });
+      sfx.play('strike', { volume: 0.3 + 0.7 * strike.accuracy });
+      strikeCount += 1;
+
       logger.debug('contribution', {
         actionType: message.actionType,
         accuracy: Number(strike.accuracy.toFixed(2)),
@@ -110,6 +149,11 @@ export async function createArena(
       event.advance(stepMs);
       timing.advance(stepMs);
       consumeStrikes();
+      // Advance juice on the fixed step so effects are deterministic and frame-rate independent.
+      floaters.advance(stepMs);
+      shake.advance(stepMs);
+      particles.advance(stepMs);
+      hpTween.advance(stepMs);
     },
     render: applyState,
   });

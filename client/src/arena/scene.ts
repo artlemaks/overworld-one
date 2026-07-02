@@ -1,14 +1,17 @@
 import { Application, Container, Graphics, Text } from 'pixi.js';
 import type { ArenaView } from './sceneModel.js';
 import type { Vec2 } from './contribution.js';
+import type { ShakeOffset, FloatingItem, ParticleItem } from './juice.js';
 
 /**
- * Arena Pixi scene (P0-C-2 / OOM-18).
+ * Arena Pixi scene (P0-C-2/5 · OOM-18, OOM-21).
  *
- * Draws the four scene elements OOM-18 calls for — background, boss sprite, HP bar, phase label —
- * and exposes `update(view)` / `layout(w, h)` so the pure view-model (`sceneModel.ts`) and the caller
- * drive it. This is the thin render layer (indication `client-screens-pure-and-testable`): no game
- * logic lives here. WebGL is unavailable in jsdom, so it is verified by typecheck + build, not units.
+ * Draws the scene elements OOM-18 calls for — background, boss sprite, HP bar, phase label — and the
+ * OOM-21 feedback juice — floating number pops, particle bursts, and camera shake (applied to a
+ * "world" layer so the UI/background stay put). It exposes `update(view)` / `layout(w, h)` plus juice
+ * render hooks so the pure modules (`sceneModel.ts`, `juice.ts`) and the caller drive it. This is the
+ * thin render layer (indication `client-screens-pure-and-testable`): no game logic lives here. WebGL
+ * is unavailable in jsdom, so it is verified by typecheck + build, not units.
  *
  * The boss "sprite" is a procedural Graphics placeholder — no art pipeline exists yet in P0.
  */
@@ -26,6 +29,12 @@ export interface ArenaScene {
   setBeat(phase: number): void;
   /** Mark where the last strike landed; `accuracy` in [0,1] tints it (OOM-19). */
   markStrike(point: Vec2, accuracy: number): void;
+  /** Offset/rotate the world layer for camera shake (OOM-21). */
+  applyShake(offset: ShakeOffset): void;
+  /** Draw the current particle set (OOM-21). */
+  drawParticles(items: ParticleItem[]): void;
+  /** Draw the current floating-text pops (OOM-21). */
+  drawFloaters(items: FloatingItem[]): void;
   destroy(): void;
 }
 
@@ -34,6 +43,8 @@ const BAR_TOP = 48;
 const TEXT_FILL = '#e6edf3';
 /** Aim ring radius as a fraction of the smaller viewport dimension — forgiving on mobile (OOM-19). */
 const STRIKE_RADIUS_FRACTION = 0.4;
+/** Reused Text objects for number pops — a fixed pool avoids per-frame allocation (OOM-21). */
+const FLOATER_POOL = 24;
 
 /** Green → amber → red as the boss weakens, so the bar reads at a glance. */
 function hpColor(fraction: number): number {
@@ -65,8 +76,11 @@ export function createArenaScene(app: Application): ArenaScene {
   app.stage.addChild(root);
 
   const background = new Graphics();
+  // The world layer holds everything that shakes; background + UI stay outside it.
+  const world = new Container();
   const beatRing = new Graphics();
   const boss = createBossSprite();
+  const particlesGfx = new Graphics();
   const strikeMark = new Graphics();
   const hpBarBg = new Graphics();
   const hpBarFill = new Graphics();
@@ -84,8 +98,21 @@ export function createArenaScene(app: Application): ArenaScene {
   });
   phaseText.anchor.set(0.5);
 
-  // beatRing sits behind the boss (pulses around it); strikeMark sits above it (where you hit).
-  root.addChild(background, beatRing, boss, strikeMark, hpBarBg, hpBarFill, hpBarBorder, phaseText, hpText);
+  // Number-pop pool: pre-created, shown/hidden per frame from drawFloaters().
+  const floaters: Text[] = [];
+  for (let i = 0; i < FLOATER_POOL; i++) {
+    const t = new Text({
+      text: '',
+      style: { fill: '#ffffff', fontFamily: 'system-ui', fontSize: 20, fontWeight: 'bold' },
+    });
+    t.anchor.set(0.5);
+    t.visible = false;
+    floaters.push(t);
+  }
+
+  // beatRing behind the boss (pulses around it); strikeMark + particles + floaters above it.
+  world.addChild(beatRing, boss, strikeMark, particlesGfx, ...floaters);
+  root.addChild(background, world, hpBarBg, hpBarFill, hpBarBorder, phaseText, hpText);
 
   let width = app.screen.width;
   let height = app.screen.height;
@@ -183,6 +210,33 @@ export function createArenaScene(app: Application): ArenaScene {
     markStrike(point: Vec2, accuracy: number): void {
       lastStrike = { point, accuracy };
       drawStrikeMark();
+    },
+    applyShake(offset: ShakeOffset): void {
+      world.position.set(offset.x, offset.y);
+      boss.rotation = offset.rotation;
+    },
+    drawParticles(items: ParticleItem[]): void {
+      particlesGfx.clear();
+      for (const p of items) {
+        particlesGfx.circle(p.x, p.y, p.radius).fill({ color: p.color, alpha: p.alpha });
+      }
+    },
+    drawFloaters(items: FloatingItem[]): void {
+      for (let i = 0; i < floaters.length; i++) {
+        const slot = floaters[i];
+        if (!slot) continue;
+        const item = items[i];
+        if (!item) {
+          slot.visible = false;
+          continue;
+        }
+        slot.visible = true;
+        slot.text = item.text;
+        slot.position.set(item.x, item.y);
+        slot.alpha = item.alpha;
+        slot.scale.set(item.scale);
+        slot.tint = item.color;
+      }
     },
     destroy(): void {
       root.destroy({ children: true });
