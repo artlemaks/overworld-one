@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { ContributionMessage, TickSnapshot } from './contracts.js';
+import { PlayerResolution } from './event.js';
 
 /**
  * WebSocket wire protocol (P1 / OOM-25, OOM-32).
@@ -96,12 +97,24 @@ export const ErrorMessage = z.object({
   message: z.string(),
 });
 
+/**
+ * Sent once per player when the event resolves (P2-S-4 / P2-C-1). Carries the player's authoritative
+ * {@link PlayerResolution} — outcome, tier, XP, commemorative, next-event countdown — which the
+ * resolution screen renders. Delivered out-of-band from the tick stream so it doesn't perturb the
+ * constant-bandwidth guarantee.
+ */
+export const ResolutionFrame = z.object({
+  type: z.literal('resolution'),
+  resolution: PlayerResolution,
+});
+
 export const ServerMessage = z.discriminatedUnion('type', [
   WelcomeMessage,
   TickFrame,
   ContribAck,
   PingMessage,
   ErrorMessage,
+  ResolutionFrame,
 ]);
 export type ServerMessage = z.infer<typeof ServerMessage>;
 
