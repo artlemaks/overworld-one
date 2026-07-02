@@ -1,5 +1,6 @@
 import type { ContributionMessage, Env } from '@overworld/shared';
 import type { CounterStore } from './state/counters.js';
+import { createMemoryParticipantStore, type ParticipantStore } from './state/participants.js';
 import type { PubSub } from './state/pubsub.js';
 import type { Transport } from './net/transport.js';
 import { createEventEngine, type EventEngine } from './game/event.js';
@@ -41,6 +42,8 @@ export interface BuildServerOptions {
   counterStore: CounterStore;
   pubsub: PubSub;
   transport: Transport;
+  /** Per-player ledger (P2-D-1). Defaults to an in-memory twin when omitted. */
+  participantStore?: ParticipantStore;
   now?: () => number;
   /** Override boss HP (the harness scales it to population). */
   bossHpMax?: number;
@@ -51,6 +54,8 @@ export interface BuiltServer {
   metrics: Metrics;
   tickLoop: TickLoop;
   gameServer: GameServer;
+  /** Per-player ledger — the resolution flow (P2-S-4) tallies over it. */
+  participants: ParticipantStore;
   processContribution: (msg: ContributionMessage, rateKey: string) => Promise<IngestResult>;
   /** Initialise the counter and start the tick + heartbeat loops. */
   start(): Promise<void>;
@@ -85,9 +90,11 @@ export async function buildServer(opts: BuildServerOptions): Promise<BuiltServer
     now,
   });
 
+  const participants = opts.participantStore ?? createMemoryParticipantStore();
+
   const processContribution = (msg: ContributionMessage, rateKey: string): Promise<IngestResult> =>
     ingestContribution(
-      { eventId: EVENT_ID, engine, pubsub: opts.pubsub, limiter, detector, metrics, now },
+      { eventId: EVENT_ID, engine, pubsub: opts.pubsub, limiter, detector, metrics, participants, now },
       msg,
       rateKey,
     );
@@ -116,6 +123,7 @@ export async function buildServer(opts: BuildServerOptions): Promise<BuiltServer
     metrics,
     tickLoop,
     gameServer,
+    participants,
     processContribution,
     async start() {
       await engine.init();

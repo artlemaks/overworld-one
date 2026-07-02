@@ -62,7 +62,7 @@ function build(processContribution: (m: ContributionMessage, k: string) => Promi
 
 describe('WS game server', () => {
   it('replies to join with a welcome carrying the authoritative bossHpMax', () => {
-    const { fake } = build(async () => ({ accepted: true, points: 10 }));
+    const { fake } = build(async () => ({ accepted: true, points: 10, xp: 0, streak: 1 }));
     const client = fake.connect();
     client.send(encode({ type: 'join', playerId: 'p1' }));
     const msg = client.last();
@@ -71,7 +71,7 @@ describe('WS game server', () => {
   });
 
   it('rejects a contribution sent before joining', () => {
-    const { fake } = build(async () => ({ accepted: true, points: 10 }));
+    const { fake } = build(async () => ({ accepted: true, points: 10, xp: 0, streak: 1 }));
     const client = fake.connect();
     client.send(encode({ type: 'contribution', seq: 0, contribution: contribution() }));
     const msg = client.last();
@@ -80,7 +80,7 @@ describe('WS game server', () => {
   });
 
   it('ingests a contribution under the socket identity and acks the authoritative points', async () => {
-    const process = vi.fn(async () => ({ accepted: true, points: 42 }) as IngestResult);
+    const process = vi.fn(async () => ({ accepted: true, points: 42, xp: 0, streak: 1 }) as IngestResult);
     const { fake } = build(process);
     const client = fake.connect('9.9.9.9');
     client.send(encode({ type: 'join', playerId: 'real-id' }));
@@ -101,7 +101,7 @@ describe('WS game server', () => {
   });
 
   it('measures latency from a pong', () => {
-    const { fake, metrics, setTime } = build(async () => ({ accepted: true, points: 1 }));
+    const { fake, metrics, setTime } = build(async () => ({ accepted: true, points: 1, xp: 0, streak: 1 }));
     const client = fake.connect();
     client.send(encode({ type: 'join', playerId: 'p1' }));
     setTime(50);
@@ -110,7 +110,7 @@ describe('WS game server', () => {
   });
 
   it('emits an error on an unparseable frame', () => {
-    const { fake } = build(async () => ({ accepted: true, points: 1 }));
+    const { fake } = build(async () => ({ accepted: true, points: 1, xp: 0, streak: 1 }));
     const client = fake.connect();
     client.send('{not json');
     const msg = client.last();
@@ -119,7 +119,7 @@ describe('WS game server', () => {
   });
 
   it('pings live clients and drops unresponsive ones on a heartbeat sweep', () => {
-    const { fake, server, setTime } = build(async () => ({ accepted: true, points: 1 }));
+    const { fake, server, setTime } = build(async () => ({ accepted: true, points: 1, xp: 0, streak: 1 }));
     const client = fake.connect();
     client.send(encode({ type: 'join', playerId: 'p1' }));
     expect(server.connectionCount()).toBe(1);

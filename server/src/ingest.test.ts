@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type { ContributionMessage } from '@overworld/shared';
 import { createMemoryCounterStore } from './state/counters.js';
+import { createMemoryParticipantStore } from './state/participants.js';
 import { createMemoryPubSub, type ContribEvent } from './state/pubsub.js';
 import { createEventEngine } from './game/event.js';
 import { createTokenBucketLimiter } from './game/ratelimit.js';
@@ -25,6 +26,7 @@ async function harness() {
     limiter: createTokenBucketLimiter({ capacity: 3, refillPerSec: 1, now }),
     detector: createAnomalyDetector({ maxRatePerSec: 100, windowMs: 1000, now }),
     metrics,
+    participants: createMemoryParticipantStore(),
     now,
   };
   return { deps, engine, metrics, published, setTime: (v: number) => (t = v) };

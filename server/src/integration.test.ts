@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type { ContributionMessage } from '@overworld/shared';
 import { createMemoryCounterStore } from './state/counters.js';
+import { createMemoryParticipantStore } from './state/participants.js';
 import { createMemoryPubSub } from './state/pubsub.js';
 import { createEventEngine } from './game/event.js';
 import { createAggregator } from './game/aggregation.js';
@@ -38,6 +39,7 @@ describe('two-node contribution integrity', () => {
       limiter: createTokenBucketLimiter({ capacity: 1000, refillPerSec: 1000, now }),
       detector: createAnomalyDetector({ maxRatePerSec: 10_000, windowMs: 1000, now }),
       metrics: createMetrics({ now }),
+      participants: createMemoryParticipantStore(),
       now,
     };
 
