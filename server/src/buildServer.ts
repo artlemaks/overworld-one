@@ -3,8 +3,11 @@ import type { CounterStore } from './state/counters.js';
 import { createMemoryParticipantStore, type ParticipantStore } from './state/participants.js';
 import type { PubSub } from './state/pubsub.js';
 import type { Transport } from './net/transport.js';
+import { createMemoryPersistence, type PersistenceStore } from './state/persistence.js';
 import { createEventEngine, type EventEngine } from './game/event.js';
 import { createAggregator } from './game/aggregation.js';
+import { createCheckpointer, type Checkpointer } from './game/checkpointer.js';
+import { recoverEvent, type RecoveryResult } from './game/recovery.js';
 import { createTickLoop, type TickLoop } from './game/tickLoop.js';
 import { createTokenBucketLimiter } from './game/ratelimit.js';
 import { createAnomalyDetector } from './game/anticheat.js';
@@ -44,6 +47,8 @@ export interface BuildServerOptions {
   transport: Transport;
   /** Per-player ledger (P2-D-1). Defaults to an in-memory twin when omitted. */
   participantStore?: ParticipantStore;
+  /** Durable persistence for checkpoints/recovery (P2-D-2/3). Defaults to an in-memory twin. */
+  persistence?: PersistenceStore;
   now?: () => number;
   /** Override boss HP (the harness scales it to population). */
   bossHpMax?: number;
@@ -56,8 +61,12 @@ export interface BuiltServer {
   gameServer: GameServer;
   /** Per-player ledger — the resolution flow (P2-S-4) tallies over it. */
   participants: ParticipantStore;
+  /** Durable persistence — checkpoints, replay log, final tallies. */
+  persistence: PersistenceStore;
+  /** Set by {@link start} to whatever auto-recovery decided on load (P2-X-1). */
+  recovery?: RecoveryResult;
   processContribution: (msg: ContributionMessage, rateKey: string) => Promise<IngestResult>;
-  /** Initialise the counter and start the tick + heartbeat loops. */
+  /** Auto-recover (P2-X-1), initialise the counter if fresh, and start the tick + heartbeat loops. */
   start(): Promise<void>;
   /** Stop the loops (does not close injected stores/transport). */
   stop(): void;
@@ -91,6 +100,7 @@ export async function buildServer(opts: BuildServerOptions): Promise<BuiltServer
   });
 
   const participants = opts.participantStore ?? createMemoryParticipantStore();
+  const persistence = opts.persistence ?? createMemoryPersistence();
 
   const processContribution = (msg: ContributionMessage, rateKey: string): Promise<IngestResult> =>
     ingestContribution(
@@ -109,6 +119,10 @@ export async function buildServer(opts: BuildServerOptions): Promise<BuiltServer
     heartbeatMs: P1_TUNING.heartbeatMs,
   });
 
+  // Durable checkpointing (P2-D-3): every tick folds its aggregate delta into the replay log and
+  // snapshots on cadence / phase change.
+  const checkpointer: Checkpointer = createCheckpointer({ persistence, eventId: EVENT_ID, now });
+
   const tickLoop = createTickLoop({
     engine,
     aggregator,
@@ -116,17 +130,27 @@ export async function buildServer(opts: BuildServerOptions): Promise<BuiltServer
     tickHz: opts.env.TICK_HZ,
     now,
     broadcast: (frame) => gameServer.broadcast(frame),
+    onTick: async (snapshot, contribDelta) => {
+      await checkpointer.onTick(snapshot.eventState, contribDelta);
+    },
   });
 
-  return {
+  const built: BuiltServer = {
     engine,
     metrics,
     tickLoop,
     gameServer,
     participants,
+    persistence,
     processContribution,
     async start() {
-      await engine.init();
+      // Auto-recovery (P2-X-1): resume a recent checkpointed event, or force-resolve a stale one and
+      // start fresh. Only a fresh start re-initialises the counter — a resume already restored it.
+      built.recovery = await recoverEvent(
+        { persistence, counterStore: opts.counterStore, participants, now },
+        { eventId: EVENT_ID, hpMax: bossHpMax, direction: 'down', startedAtTs: now(), nextEventInMs: 0 },
+      );
+      if (built.recovery.action !== 'resumed') await engine.init();
       tickLoop.start();
       gameServer.start();
     },
@@ -135,4 +159,5 @@ export async function buildServer(opts: BuildServerOptions): Promise<BuiltServer
       gameServer.stop();
     },
   };
+  return built;
 }

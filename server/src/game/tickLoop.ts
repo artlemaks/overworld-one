@@ -29,6 +29,12 @@ export interface TickLoopDeps {
    * Encoding once here (not per client) is what keeps the fan-out cheap and the bytes identical.
    */
   broadcast: (frame: string) => number;
+  /**
+   * Optional post-tick hook (P2-D-3): given the tick's authoritative state and its aggregate
+   * contribution delta, the checkpointer folds it into the durable record. Awaited so a checkpoint
+   * write can't be lost, but off the broadcast critical path.
+   */
+  onTick?: (snapshot: TickSnapshot, contribDelta: number) => void | Promise<void>;
 }
 
 export interface TickLoop {
@@ -41,7 +47,7 @@ export interface TickLoop {
 }
 
 export function createTickLoop(deps: TickLoopDeps): TickLoop {
-  const { engine, aggregator, metrics, tickHz, now, broadcast } = deps;
+  const { engine, aggregator, metrics, tickHz, now, broadcast, onTick } = deps;
   if (tickHz <= 0) throw new Error('tickHz must be > 0');
   const intervalMs = 1000 / tickHz;
 
@@ -60,6 +66,7 @@ export function createTickLoop(deps: TickLoopDeps): TickLoop {
     const bytesPerClient = Buffer.byteLength(frame, 'utf8');
     broadcast(frame);
     metrics.recordTick(bytesPerClient);
+    if (onTick) await onTick(snapshot, sample.stats.contribDelta);
     return snapshot;
   };
 
