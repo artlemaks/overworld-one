@@ -23,3 +23,6 @@ export * from './privacy.js';
 export * from './moderation.js';
 export * from './challenge.js';
 export * from './liveops.js';
+// P6 — soft launch
+export * from './analytics.js';
+export * from './marketing.js';
